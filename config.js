@@ -1,6 +1,6 @@
 module.exports = {
   // ⚠️ Remplacez par votre numéro WhatsApp (format international, sans +)
-  OWNER_NUMBER: "237682598338",
+  OWNER_NUMBER: "23781015024",
 
   // URL de votre service Render (pour le keep-alive)
   // Ex : "https://spectral-hunter.onrender.com"
