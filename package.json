@@ -1,0 +1,16 @@
+{
+  "name": "spectral-hunter",
+  "version": "3.0.0",
+  "description": "Bot WhatsApp de protection de groupes contre les purgeurs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
