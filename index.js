@@ -29,7 +29,7 @@ const client = new Client({
 client.on("qr", async () => {
   try {
     logger.info("Génération du Pairing Code...");
-    const number = config.OWNER_NUMBER.replace(/[^0-9]/g, "");
+    const number = "+" + config.OWNER_NUMBER.replace(/[^0-9]/g, "");;
     const code = await client.requestPairingCode(number);
     const formatted = code?.match(/.{1,4}/g)?.join("-") || code;
 
