@@ -21,6 +21,14 @@ const client = new Client({
       "--no-first-run",
       "--no-zygote",
       "--single-process",
+      "--disable-extensions",
+      "--disable-software-rasterizer",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--metrics-recording-only",
+      "--mute-audio",
+      "--no-default-browser-check",
     ],
   },
 });
@@ -29,7 +37,9 @@ const client = new Client({
 client.on("qr", async () => {
   try {
     logger.info("Génération du Pairing Code...");
-    const number = "+" + config.OWNER_NUMBER.replace(/[^0-9]/g, "");;
+    // Attendre que Chromium soit bien stabilisé
+    await new Promise(res => setTimeout(res, 5000));
+    const number = "+" + config.OWNER_NUMBER.replace(/[^0-9]/g, "");
     const code = await client.requestPairingCode(number);
     const formatted = code?.match(/.{1,4}/g)?.join("-") || code;
 
@@ -145,3 +155,4 @@ keepalive.startServer(config.RENDER_URL);
 
 logger.info("🚀 Démarrage de Spectral Hunter MD V1...");
 client.initialize();
+      
