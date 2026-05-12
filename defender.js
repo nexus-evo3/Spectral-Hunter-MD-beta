@@ -7,13 +7,23 @@ const antispam = require("./modules/antispam");
 const config = require("./config");
 
 const BUG_PATTERNS = [
-  (msg) => msg.body && msg.body.length > 5000,
-  (msg) => msg.body && /[\u200B-\u200F\uFEFF]{5,}/.test(msg.body),
-  (msg) => msg.body && /(.)\1{200,}/.test(msg.body),
-  (msg) => msg.body && /(javascript:|<script|%00)/i.test(msg.body),
+  (body) => body.length > 5000,
+  (body) => /[\u200B-\u200F\uFEFF]{5,}/.test(body),
+  (body) => /(.)\1{200,}/.test(body),
+  (body) => /(javascript:|<script|%00)/i.test(body),
 ];
 
 const removalTracker = {};
+
+function getBody(msg) {
+  return (
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption ||
+    msg.message?.videoMessage?.caption ||
+    ""
+  );
+}
 
 function trackRemoval(number) {
   const now = Date.now();
@@ -31,193 +41,156 @@ function logAttack(number, type) {
   store.push("attackLog", { number, type, date: new Date().toISOString() });
 }
 
-async function alertOwner(client, title, details) {
+async function alertOwner(sock, title, details) {
   try {
-    await client.sendMessage(
-      config.OWNER_NUMBER + "@c.us",
-      `🚨 *SPECTRAL HUNTER — ${title}*\n\n${details}\n📅 ${new Date().toLocaleString("fr-FR")}`
-    );
+    await sock.sendMessage(config.OWNER_NUMBER + "@s.whatsapp.net", {
+      text: `🚨 *SPECTRAL HUNTER — ${title}*\n\n${details}\n📅 ${new Date().toLocaleString("fr-FR")}`,
+    });
   } catch (e) {
     logger.warn(`Alerte propriétaire échouée : ${e.message}`);
   }
 }
 
-// ─── Gestionnaire principal ───────────────────────────────────────────────────
 async function handleMessage(ctx) {
-  const { client, message, chat, sender, senderNumber, isAdmin, isOwner } = ctx;
-
+  const { sock, msg, jid, sender, senderNumber, isAdmin, isOwner } = ctx;
   if (isOwner || isAdmin) return;
   if (whitelist.isWhitelisted(senderNumber)) return;
 
-  // 1. Blacklist
+  const body = getBody(msg);
+
   if (blacklist.isBlacklisted(senderNumber)) {
     logger.ban(`Blacklisté : ${senderNumber}`);
-    await message.delete(true).catch(() => {});
-    await chat.removeParticipants([sender]).catch(() => {});
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
+    await sock.groupParticipantsUpdate(jid, [sender], "remove").catch(() => {});
     return;
   }
 
-  // 2. Mode Forteresse
   if (store.get("fortress")) {
-    await message.delete(true).catch(() => {});
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
     return;
   }
 
-  // 3. Membres muets
   const mutedUsers = store.get("mutedUsers") || [];
   if (mutedUsers.includes(senderNumber)) {
-    await message.delete(true).catch(() => {});
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
     return;
   }
 
-  // 4. Message bug
-  if (BUG_PATTERNS.some((p) => p(message))) {
+  if (body && BUG_PATTERNS.some((p) => p(body))) {
     logger.alert(`Message bug de ${senderNumber}`);
-    await message.delete(true).catch(() => {});
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
     blacklist.add(senderNumber, "Message bug", "auto");
     logAttack(senderNumber, "Message bug");
-    await chat.removeParticipants([sender]).catch(() => {});
-    await alertOwner(client, "Message Bug",
-      `⚠️ Message malveillant supprimé\n📵 ${senderNumber}\n🚫 Expulsé et blacklisté`
-    );
+    await sock.groupParticipantsUpdate(jid, [sender], "remove").catch(() => {});
+    await alertOwner(sock, "Message Bug", `⚠️ Message malveillant\n📵 ${senderNumber}\n🚫 Expulsé et blacklisté`);
     return;
   }
 
-  // 5. Anti-lien
-  if (store.get("antilink") && message.body && antilink.containsLink(message.body)) {
-    await message.delete(true).catch(() => {});
-    await chat.sendMessage(`⚠️ @${senderNumber} Les liens ne sont pas autorisés.`);
+  if (store.get("antilink") && body && antilink.containsLink(body)) {
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
+    await sock.sendMessage(jid, { text: `⚠️ @${senderNumber} Les liens ne sont pas autorisés.`, mentions: [sender] });
     return;
   }
 
-  // 6. Anti-spam
   if (store.get("antispam") && antispam.isSpamming(senderNumber)) {
     logger.alert(`Spam de ${senderNumber}`);
-    await message.delete(true).catch(() => {});
+    await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
     blacklist.add(senderNumber, "Spam", "auto");
     logAttack(senderNumber, "Spam");
-    await chat.removeParticipants([sender]).catch(() => {});
-    await alertOwner(client, "Spam Détecté",
-      `⚠️ Spammeur expulsé\n📵 ${senderNumber}\n🚫 Blacklisté`
-    );
+    await sock.groupParticipantsUpdate(jid, [sender], "remove").catch(() => {});
+    await alertOwner(sock, "Spam", `⚠️ Spammeur expulsé\n📵 ${senderNumber}`);
     return;
   }
 }
 
-// ─── VV ──────────────────────────────────────────────────────────────────────
 async function handleViewOnce(ctx) {
-  const { client, message, chat, senderNumber } = ctx;
-
-  if (!message.isViewOnce) return;
-
+  const { sock, msg, jid, senderNumber, isGroup, groupMeta, downloadMediaMessage } = ctx;
+  const viewOnce = msg.message?.viewOnceMessage?.message || msg.message?.viewOnceMessageV2?.message;
+  if (!viewOnce) return;
   try {
-    const source = chat.isGroup ? `Groupe : ${chat.name}` : "Privé";
+    const source = isGroup ? `Groupe : ${groupMeta?.subject || jid}` : "Privé";
     logger.info(`VV intercepté de ${senderNumber}`);
-
-    const media = await message.downloadMedia();
-    if (!media) return;
-
-    await client.sendMessage(
-      config.OWNER_NUMBER + "@c.us",
-      media,
-      {
-        caption:
-          `👁️ *VV Intercepté*\n` +
-          `📱 De : ${senderNumber}\n` +
-          `📍 ${source}\n` +
-          `📅 ${new Date().toLocaleString("fr-FR")}`,
-      }
-    );
+    const fakeMsg = { ...msg, message: viewOnce };
+    const buffer = await downloadMediaMessage(fakeMsg, "buffer", {});
+    if (!buffer) return;
+    const mediaType = Object.keys(viewOnce)[0];
+    let content = {};
+    if (mediaType === "imageMessage") {
+      content = { image: buffer, caption: `👁️ *VV*\n📱 ${senderNumber}\n📍 ${source}\n📅 ${new Date().toLocaleString("fr-FR")}` };
+    } else if (mediaType === "videoMessage") {
+      content = { video: buffer, caption: `👁️ *VV*\n📱 ${senderNumber}\n📍 ${source}\n📅 ${new Date().toLocaleString("fr-FR")}` };
+    } else if (mediaType === "audioMessage") {
+      content = { audio: buffer, mimetype: "audio/mp4" };
+    } else {
+      content = { document: buffer, fileName: "vv_media" };
+    }
+    await sock.sendMessage(config.OWNER_NUMBER + "@s.whatsapp.net", content);
   } catch (e) {
     logger.warn(`Erreur VV : ${e.message}`);
   }
 }
 
-// ─── Joinstick ───────────────────────────────────────────────────────────────
 async function handleStickerTrigger(ctx, dispatchFn) {
-  const { message } = ctx;
-  if (message.type !== "sticker") return false;
-
-  const sha256 = message._data?.fileSha256;
+  const { sock, msg, jid } = ctx;
+  if (!msg.message?.stickerMessage) return false;
+  const sha256 = msg.message.stickerMessage.fileSha256;
   if (!sha256) return false;
-
   const stickerId = Buffer.from(sha256).toString("base64");
   const bindings = store.get("stickerBindings") || {};
   const command = bindings[stickerId];
   if (!command) return false;
-
   logger.info(`Sticker trigger : ${command}`);
-  await message.delete(true).catch(() => {});
-
-  const fakeMessage = Object.create(message);
-  fakeMessage.body = command;
-
-  await dispatchFn({ ...ctx, message: fakeMessage });
+  await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
+  const fakeMsg = JSON.parse(JSON.stringify(msg));
+  fakeMsg.message = { conversation: command };
+  await dispatchFn({ ...ctx, msg: fakeMsg });
   return true;
 }
 
-// ─── Bienvenue / Au revoir ───────────────────────────────────────────────────
-async function handleGroupJoin(client, notification) {
-  const welcome = store.get("welcome");
-  if (!welcome?.enabled) return;
-  try {
-    const chat = await notification.getChat();
-    const contact = await notification.getContact();
-    const name = contact.pushname || notification.id.participant.replace("@c.us", "");
-    const msg = welcome.message.replace("{name}", name).replace("{group}", chat.name);
-    await chat.sendMessage(msg);
-  } catch (e) {
-    logger.warn(`Erreur bienvenue : ${e.message}`);
+async function handleGroupParticipants(sock, update, ownerNumber) {
+  const { id: jid, participants, action } = update;
+
+  if (action === "add") {
+    const welcome = store.get("welcome");
+    if (welcome?.enabled) {
+      for (const participant of participants) {
+        try {
+          const number = participant.replace("@s.whatsapp.net", "");
+          const msg = welcome.message.replace("{name}", number).replace("{group}", jid);
+          await sock.sendMessage(jid, { text: msg });
+        } catch (_) {}
+      }
+    }
+  }
+
+  if (action === "remove") {
+    const goodbye = store.get("goodbye");
+    if (goodbye?.enabled) {
+      for (const participant of participants) {
+        try {
+          const number = participant.replace("@s.whatsapp.net", "");
+          const msg = goodbye.message.replace("{name}", number).replace("{group}", jid);
+          await sock.sendMessage(jid, { text: msg });
+        } catch (_) {}
+      }
+    }
+
+    const author = update.author?.replace("@s.whatsapp.net", "");
+    if (author && author !== ownerNumber && trackRemoval(author)) {
+      blacklist.add(author, "Purge en masse", "auto");
+      logAttack(author, "Purge en masse");
+      await alertOwner(sock, "Purge Détectée",
+        `⚠️ Expulsions en masse !\n📵 ${author}\n🚫 Blacklisté`
+      );
+    }
+  }
+
+  if (["promote", "demote"].includes(action) && store.get("adminwatch")) {
+    const action_fr = action === "promote" ? "⬆️ PROMU ADMIN" : "⬇️ RÉTROGRADÉ";
+    const target = participants[0]?.replace("@s.whatsapp.net", "");
+    await alertOwner(sock, "Changement Admin", `${action_fr}\n👤 ${target}`);
   }
 }
 
-async function handleGroupLeave(client, notification) {
-  const goodbye = store.get("goodbye");
-  if (!goodbye?.enabled) return;
-  try {
-    const chat = await notification.getChat();
-    const contact = await notification.getContact();
-    const name = contact.pushname || notification.id.participant.replace("@c.us", "");
-    const msg = goodbye.message.replace("{name}", name).replace("{group}", chat.name);
-    await chat.sendMessage(msg);
-  } catch (e) {
-    logger.warn(`Erreur au revoir : ${e.message}`);
-  }
-}
-
-// ─── Purge / Admin Watch ─────────────────────────────────────────────────────
-async function handleMassRemoval(client, notification, ownerNumber) {
-  if (notification.type !== "remove") return;
-  const authorNumber = notification.author?.replace("@c.us", "");
-  if (!authorNumber || authorNumber === ownerNumber) return;
-
-  if (trackRemoval(authorNumber)) {
-    logger.alert(`Purge en masse par ${authorNumber}`);
-    blacklist.add(authorNumber, "Purge en masse", "auto");
-    logAttack(authorNumber, "Purge en masse");
-    await alertOwner(client, "Purge Détectée !",
-      `⚠️ Expulsions en masse !\n📵 ${authorNumber}\n🚫 Blacklisté`
-    );
-  }
-}
-
-async function handleAdminChange(client, notification, ownerNumber) {
-  if (!store.get("adminwatch")) return;
-  if (!["promote", "demote"].includes(notification.type)) return;
-  const action = notification.type === "promote" ? "⬆️ PROMU ADMIN" : "⬇️ RÉTROGRADÉ";
-  const target = notification.id.participant?.replace("@c.us", "");
-  const by = notification.author?.replace("@c.us", "");
-  await alertOwner(client, "Changement Admin",
-    `${action}\n👤 Membre : ${target}\n👑 Par : ${by || "Inconnu"}`
-  );
-}
-
-module.exports = {
-  handleMessage,
-  handleViewOnce,
-  handleStickerTrigger,
-  handleGroupJoin,
-  handleGroupLeave,
-  handleMassRemoval,
-  handleAdminChange,
-};
+module.exports = { handleMessage, handleViewOnce, handleStickerTrigger, handleGroupParticipants, getBody };
+                              
