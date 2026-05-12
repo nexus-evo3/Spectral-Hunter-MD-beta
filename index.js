@@ -1,4 +1,11 @@
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+} = require("@whiskeysockets/baileys");
+const pino = require("pino");
 const config = require("./config");
 const logger = require("./logger");
 const blacklist = require("./blacklist");
@@ -7,152 +14,116 @@ const store = require("./store");
 const defender = require("./defender");
 const router = require("./commands/router");
 const keepalive = require("./keepalive");
+const { restoreSession, hasLocalSession, clearSession, AUTH_FOLDER } = require("./session");
 
-const client = new Client({
-  authStrategy: new LocalAuth({ clientId: "spectral-hunter" }),
-  puppeteer: {
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-      "--disable-extensions",
-      "--disable-software-rasterizer",
-      "--disable-background-networking",
-      "--disable-default-apps",
-      "--disable-sync",
-      "--metrics-recording-only",
-      "--mute-audio",
-      "--no-default-browser-check",
-    ],
-  },
-});
+let sock;
 
-// ─── CONNEXION PAR PAIRING CODE ─────────────────────────────────────────────
-client.on("qr", async () => {
-  try {
-    logger.info("Génération du Pairing Code...");
-    // Attendre que Chromium soit bien stabilisé
-    await new Promise(res => setTimeout(res, 5000));
-    const number = "+" + config.OWNER_NUMBER.replace(/[^0-9]/g, "");
-    const code = await client.requestPairingCode(number);
-    const formatted = code?.match(/.{1,4}/g)?.join("-") || code;
-
-    console.log("\n");
-    console.log("╔══════════════════════════════════════════════╗");
-    console.log("║         🛡️  SPECTRAL HUNTER MD V1           ║");
-    console.log("║                                              ║");
-    console.log(`║   CODE : ${formatted.padEnd(36)}║`);
-    console.log("║                                              ║");
-    console.log("║  WhatsApp > Appareils connectés              ║");
-    console.log("║  > Connecter avec un numéro de téléphone     ║");
-    console.log("╚══════════════════════════════════════════════╝");
-    console.log("\n");
-
-    logger.info(`Pairing Code : ${formatted}`);
-  } catch (e) {
-    logger.warn(`Erreur Pairing Code : ${e.message}`);
+async function startBot() {
+  // Restaurer la session depuis SESSION_ID
+  if (process.env.SESSION_ID && !hasLocalSession()) {
+    const ok = await restoreSession(process.env.SESSION_ID);
+    if (!ok) {
+      logger.warn("SESSION_ID invalide. Vérifiez la variable d'environnement.");
+      process.exit(1);
+    }
+  } else if (!hasLocalSession()) {
+    logger.warn("⚠️ Aucune SESSION_ID trouvée !");
+    logger.warn("Ajoutez SESSION_ID dans vos variables d'environnement.");
+    process.exit(1);
+  } else {
+    logger.info("✅ Session locale détectée — reconnexion...");
   }
-});
 
-// ─── BOT CONNECTÉ ────────────────────────────────────────────────────────────
-client.on("ready", async () => {
-  logger.info("✅ Spectral Hunter MD V1 opérationnel !");
-  keepalive.setConnected(true);
-  try {
-    await client.sendMessage(
-      config.OWNER_NUMBER + "@c.us",
-      `🛡️ *SPECTRAL HUNTER MD V1*\n\n` +
-      `✅ Bot connecté et opérationnel !\n` +
-      `📅 ${new Date().toLocaleString("fr-FR")}\n\n` +
-      `Tapez *!help* pour voir toutes les commandes.`
-    );
-  } catch (_) {}
-});
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+  const { version } = await fetchLatestBaileysVersion();
 
-client.on("auth_failure", () => {
-  logger.warn("❌ Échec d'authentification");
-  keepalive.setConnected(false);
-});
+  sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    logger: pino({ level: "silent" }),
+    browser: ["Spectral Hunter", "Chrome", "1.0.0"],
+  });
 
-client.on("disconnected", (reason) => {
-  logger.warn(`Déconnecté : ${reason}`);
-  keepalive.setConnected(false);
-  setTimeout(() => client.initialize(), 5000);
-});
-
-// ─── MESSAGES ────────────────────────────────────────────────────────────────
-client.on("message", async (message) => {
-  try {
-    const chat = await message.getChat();
-    const sender = message.author || message.from;
-    const senderNumber = sender.replace("@c.us", "").replace(/[^0-9]/g, "");
-    const isOwner = senderNumber === config.OWNER_NUMBER.replace(/[^0-9]/g, "");
-
-    let groupAdmins = [];
-    let isAdmin = false;
-    if (chat.isGroup) {
-      groupAdmins = chat.participants
-        .filter((p) => p.isAdmin || p.isSuperAdmin)
-        .map((p) => p.id._serialized);
-      isAdmin = groupAdmins.includes(sender);
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+    if (connection === "open") {
+      logger.info("✅ Spectral Hunter connecté !");
+      keepalive.setConnected(true);
+      try {
+        await sock.sendMessage(config.OWNER_NUMBER + "@s.whatsapp.net", {
+          text:
+            `🛡️ *SPECTRAL HUNTER MD V1*\n\n` +
+            `✅ Bot connecté et opérationnel !\n` +
+            `📅 ${new Date().toLocaleString("fr-FR")}\n\n` +
+            `Tapez *!help* pour voir toutes les commandes.`,
+        });
+      } catch (_) {}
     }
 
-    const ctx = {
-      client,
-      message,
-      chat,
-      sender,
-      senderNumber,
-      isOwner,
-      isAdmin,
-      isGroup: chat.isGroup,
-      groupAdmins,
-    };
+    if (connection === "close") {
+      keepalive.setConnected(false);
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut = code === DisconnectReason.loggedOut;
+      logger.warn(`Déconnecté (code: ${code})`);
+      if (loggedOut) {
+        logger.warn("Session expirée — suppression et arrêt.");
+        clearSession();
+        process.exit(1);
+      } else {
+        logger.info("Reconnexion dans 5s...");
+        setTimeout(startBot, 5000);
+      }
+    }
+  });
 
-    // VV — interception vues uniques
-    await defender.handleViewOnce(ctx);
+  sock.ev.on("creds.update", saveCreds);
 
-    // Joinstick — sticker trigger
-    const triggered = await defender.handleStickerTrigger(ctx, router.dispatch);
-    if (triggered) return;
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const msg of messages) {
+      try {
+        if (!msg.message) continue;
+        if (msg.key.fromMe) continue;
+        const jid = msg.key.remoteJid;
+        if (!jid) continue;
+        const isGroup = jid.endsWith("@g.us");
+        const sender = isGroup ? msg.key.participant : msg.key.remoteJid;
+        const senderNumber = sender?.replace(/[^0-9]/g, "") || "";
+        const ownerNumber = config.OWNER_NUMBER.replace(/[^0-9]/g, "");
+        const isOwner = senderNumber === ownerNumber;
 
-    // Défense automatique
-    if (chat.isGroup) await defender.handleMessage(ctx);
+        let groupMeta = null;
+        let isAdmin = false;
+        if (isGroup) {
+          try {
+            groupMeta = await sock.groupMetadata(jid);
+            const adminList = groupMeta.participants.filter((p) => p.admin).map((p) => p.id);
+            isAdmin = adminList.includes(sender);
+          } catch (_) {}
+        }
 
-    // Commandes
-    await router.dispatch(ctx);
+        const ctx = { sock, msg, jid, sender, senderNumber, isOwner, isAdmin, isGroup, groupMeta, downloadMediaMessage };
 
-  } catch (err) {
-    logger.warn(`Erreur message : ${err.message}`);
-  }
-});
+        await defender.handleViewOnce(ctx);
+        const triggered = await defender.handleStickerTrigger(ctx, router.dispatch);
+        if (triggered) continue;
+        if (isGroup) await defender.handleMessage(ctx);
+        await router.dispatch(ctx);
+      } catch (err) {
+        logger.warn(`Erreur message : ${err.message}`);
+      }
+    }
+  });
 
-// ─── ÉVÉNEMENTS DE GROUPE ────────────────────────────────────────────────────
-client.on("group_join", (notif) => {
-  defender.handleGroupJoin(client, notif).catch(() => {});
-});
+  sock.ev.on("group-participants.update", async (update) => {
+    await defender.handleGroupParticipants(sock, update, config.OWNER_NUMBER).catch(() => {});
+  });
+}
 
-client.on("group_leave", (notif) => {
-  defender.handleGroupLeave(client, notif).catch(() => {});
-});
-
-client.on("group_update", async (notif) => {
-  await defender.handleMassRemoval(client, notif, config.OWNER_NUMBER).catch(() => {});
-  await defender.handleAdminChange(client, notif, config.OWNER_NUMBER).catch(() => {});
-});
-
-// ─── DÉMARRAGE ───────────────────────────────────────────────────────────────
 blacklist.init();
 whitelist.init();
 router.loadCommands();
 keepalive.startServer(config.RENDER_URL);
-
 logger.info("🚀 Démarrage de Spectral Hunter MD V1...");
-client.initialize();
+startBot();
       
