@@ -7,16 +7,16 @@ module.exports = {
   RENDER_URL: process.env.RENDER_URL || "",
 
   // Préfixe des commandes
-  PREFIX: "!",
+  PREFIX: process.env.PREFIX || "",
 
   // Nom du bot
   BOT_NAME: "Spectral Hunter",
 
   // Anti-spam : nombre de messages max dans la fenêtre de temps
   SPAM_THRESHOLD: 5,
-  SPAM_WINDOW_MS: 5000, // 5 secondes
+  SPAM_WINDOW_MS: 3000, // 5 secondes
 
   // Détection de purge : expulsions max dans la fenêtre de temps
-  PURGE_THRESHOLD: 3,
+  PURGE_THRESHOLD: 5,
   PURGE_WINDOW_MS: 10000, // 10 secondes
 };
