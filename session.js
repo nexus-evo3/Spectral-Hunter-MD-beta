@@ -8,21 +8,45 @@ async function restoreSession(sessionId) {
   try {
     logger.info(`Restauration de la session...`);
 
+    // Extraire la partie après le préfixe (levanter_, spectral_, etc.)
     let encoded = sessionId;
-
-    // Supprimer les préfixes connus (levanter_, spectral_, etc.)
     if (sessionId.includes("_")) {
-      encoded = sessionId.split("_").slice(1).join("_");
+      encoded = sessionId.substring(sessionId.indexOf("_") + 1);
     }
 
-    // Décoder le base64
-    const decoded = Buffer.from(encoded, "base64").toString("utf8");
-    const authData = JSON.parse(decoded);
+    let authData;
 
-    // Créer le dossier auth
+    // Tentative 1 : base64 standard
+    try {
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
+      authData = JSON.parse(decoded);
+      logger.info("Session décodée en base64 standard");
+    } catch (_) {}
+
+    // Tentative 2 : base64url
+    if (!authData) {
+      try {
+        const base64url = encoded.replace(/-/g, "+").replace(/_/g, "/");
+        const decoded = Buffer.from(base64url, "base64").toString("utf8");
+        authData = JSON.parse(decoded);
+        logger.info("Session décodée en base64url");
+      } catch (_) {}
+    }
+
+    // Tentative 3 : la session est directement un JSON stringifié
+    if (!authData) {
+      try {
+        authData = JSON.parse(encoded);
+        logger.info("Session décodée en JSON direct");
+      } catch (_) {}
+    }
+
+    if (!authData) {
+      throw new Error("Format de session non reconnu");
+    }
+
     fs.mkdirSync(AUTH_FOLDER, { recursive: true });
 
-    // Écrire chaque fichier de session
     for (const [file, content] of Object.entries(authData)) {
       const filePath = path.join(AUTH_FOLDER, file);
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -42,10 +66,7 @@ async function restoreSession(sessionId) {
 }
 
 function hasLocalSession() {
-  return (
-    fs.existsSync(AUTH_FOLDER) &&
-    fs.readdirSync(AUTH_FOLDER).length > 0
-  );
+  return fs.existsSync(AUTH_FOLDER) && fs.readdirSync(AUTH_FOLDER).length > 0;
 }
 
 function clearSession() {
@@ -55,4 +76,4 @@ function clearSession() {
 }
 
 module.exports = { restoreSession, hasLocalSession, clearSession, AUTH_FOLDER };
-
+      
