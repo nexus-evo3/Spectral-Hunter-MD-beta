@@ -4,11 +4,12 @@ const whitelist = require("../whitelist");
 module.exports = [
   {
     name: "fortress",
-    aliases: ["forteresse", "fort"],
+    aliases: ["forteresse"],
     category: "protection",
     description: "Activer/désactiver le mode forteresse",
     usage: "!fortress on/off",
-    ownerOnly: true, groupOnly: true,
+    ownerOnly: true,
+    groupOnly: true,
     handler: async ({ reply, args }) => {
       const mode = args[0]?.toLowerCase();
       if (!["on", "off"].includes(mode)) { await reply("❌ Usage : !fortress on/off"); return; }
@@ -22,7 +23,9 @@ module.exports = [
     category: "protection",
     description: "Activer/désactiver l'anti-lien",
     usage: "!antilink on/off",
-    ownerOnly: false, adminOnly: true, groupOnly: true,
+    ownerOnly: false,
+    adminOnly: true,
+    groupOnly: true,
     handler: async ({ reply, args }) => {
       const mode = args[0]?.toLowerCase();
       if (!["on", "off"].includes(mode)) { await reply("❌ Usage : !antilink on/off"); return; }
@@ -36,7 +39,9 @@ module.exports = [
     category: "protection",
     description: "Activer/désactiver l'anti-spam",
     usage: "!antispam on/off",
-    ownerOnly: false, adminOnly: true, groupOnly: true,
+    ownerOnly: false,
+    adminOnly: true,
+    groupOnly: true,
     handler: async ({ reply, args }) => {
       const mode = args[0]?.toLowerCase();
       if (!["on", "off"].includes(mode)) { await reply("❌ Usage : !antispam on/off"); return; }
@@ -48,7 +53,7 @@ module.exports = [
     name: "whitelist",
     aliases: ["wl"],
     category: "protection",
-    description: "Ajouter un numéro à la whitelist",
+    description: "Ajouter à la whitelist",
     usage: "!whitelist [numéro]",
     ownerOnly: true,
     handler: async ({ reply, args }) => {
@@ -61,13 +66,13 @@ module.exports = [
     name: "unwhitelist",
     aliases: ["uwl"],
     category: "protection",
-    description: "Retirer un numéro de la whitelist",
+    description: "Retirer de la whitelist",
     usage: "!unwhitelist [numéro]",
     ownerOnly: true,
     handler: async ({ reply, args }) => {
       const number = args[0];
       if (!number) { await reply("❌ Usage : !unwhitelist [numéro]"); return; }
-      await reply(whitelist.remove(number) ? `✅ *${number}* retiré de la whitelist.` : `⚠️ *${number}* n'est pas dans la whitelist.`);
+      await reply(whitelist.remove(number) ? `✅ *${number}* retiré.` : `⚠️ *${number}* n'est pas dans la whitelist.`);
     },
   },
   {
@@ -75,10 +80,11 @@ module.exports = [
     aliases: ["swl"],
     category: "protection",
     description: "Afficher la whitelist",
-    usage: "!showwhitelist",
+    vusage: "!showwhitelist",
     ownerOnly: true,
     handler: async ({ reply }) => {
       await reply(`✅ *WHITELIST (${whitelist.getAll().length})*\n\n${whitelist.exportList()}`);
     },
   },
 ];
+    
