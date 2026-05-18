@@ -4,13 +4,14 @@
   "description": "Bot WhatsApp de protection de groupes",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "connect": "node connect.js"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "whatsapp-web.js": "^1.23.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc11",
     "pino": "^8.0.0"
   }
 }
