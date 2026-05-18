@@ -1,11 +1,20 @@
 /**
- * SPECTRAL HUNTER — Script de connexion (whatsapp-web.js)
+ * SPECTRAL HUNTER — Script de connexion
  * Lancez ce script UNE SEULE FOIS pour générer la session.
  * Usage : node connect.js 237681015024
  */
 
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers,
+} = require("@whiskeysockets/baileys");
+const pino = require("pino");
 const readline = require("readline");
+
+const AUTH_FOLDER = "auth_info";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -22,7 +31,7 @@ function askNumber() {
 }
 
 async function connect() {
-  console.log("\n🛡️  SPECTRAL HUNTER — Connexion WhatsApp\n");
+  console.log("\n🛡️  SPECTRAL HUNTER MD V1 — Connexion WhatsApp\n");
 
   const number = await askNumber();
   if (!number || number.length < 8) {
@@ -33,61 +42,63 @@ async function connect() {
   console.log(`📱 Numéro : ${number}`);
   console.log("⏳ Démarrage...\n");
 
-  const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "spectral-hunter" }),
-    puppeteer: {
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-first-run",
-        "--no-zygote",
-        "--single-process",
-      ],
-    },
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    logger: pino({ level: "silent" }),
+    browser: Browsers.ubuntu("Chrome"),
+    mobile: false,
+    keepAliveIntervalMs: 10000,
+    connectTimeoutMs: 60000,
+    defaultQueryTimeoutMs: 60000,
   });
 
-  client.on("qr", async () => {
-    setTimeout(async () => {
-      try {
-        const code = await client.requestPairingCode("+" + number);
-        const formatted = code?.match(/.{1,4}/g)?.join("-") || code;
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+    if (qr) {
+      setTimeout(async () => {
+        try {
+          const code = await sock.requestPairingCode(number);
+          const formatted = code?.match(/.{1,4}/g)?.join("-") || code;
 
-        console.log("\n╔══════════════════════════════════════════════╗");
-        console.log("║         🛡️  SPECTRAL HUNTER                 ║");
-        console.log("║                                              ║");
-        console.log(`║   CODE : ${formatted.padEnd(36)}║`);
-        console.log("║                                              ║");
-        console.log("║  WhatsApp > Appareils connectés              ║");
-        console.log("║  > Connecter avec un numéro de téléphone     ║");
-        console.log("╚══════════════════════════════════════════════╝\n");
-      } catch (e) {
-        console.log(`❌ Erreur code : ${e.message}`);
-        console.log("Nouvelle tentative dans 10s...");
-        setTimeout(() => client.initialize(), 10000);
+          console.log("\n╔══════════════════════════════════════════════╗");
+          console.log("║         🛡️  SPECTRAL HUNTER MD V1           ║");
+          console.log("║                                              ║");
+          console.log(`║   CODE : ${formatted.padEnd(36)}║`);
+          console.log("║                                              ║");
+          console.log("║  WhatsApp > Appareils connectés              ║");
+          console.log("║  > Connecter avec un numéro de téléphone     ║");
+          console.log("╚══════════════════════════════════════════════╝\n");
+        } catch (e) {
+          console.log(`❌ Erreur code : ${e.message}`);
+        }
+      }, 10000);
+    }
+
+    if (connection === "open") {
+      console.log("\n✅ Connexion réussie ! Session sauvegardée.");
+      console.log("🚀 Lancez maintenant : node index.js\n");
+      rl.close();
+      process.exit(0);
+    }
+
+    if (connection === "close") {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      if (code === DisconnectReason.loggedOut) {
+        console.log("❌ Déconnecté. Relancez le script.");
+        process.exit(1);
       }
-    }, 5000);
+    }
   });
 
-  client.on("ready", () => {
-    console.log("\n✅ Connexion réussie ! Session sauvegardée.");
-    console.log("🚀 Lancez maintenant : node index.js\n");
-    rl.close();
-    process.exit(0);
-  });
-
-  client.on("auth_failure", () => {
-    console.log("❌ Échec authentification. Relancez le script.");
-    process.exit(1);
-  });
-
-  client.initialize();
+  sock.ev.on("creds.update", saveCreds);
 }
 
 connect().catch((e) => {
   console.error("Erreur :", e.message);
   process.exit(1);
 });
-                
+  
