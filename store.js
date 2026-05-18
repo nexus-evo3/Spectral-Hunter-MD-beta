@@ -12,8 +12,8 @@ const DEFAULTS = {
   goodbye: { enabled: false, message: "👋 Au revoir {name} !" },
   mutedUsers: [],
   attackLog: [],
-  stickerBindings: {},
   membersBackup: {},
+  stickerBindings: {},
 };
 
 function load() {
@@ -22,8 +22,7 @@ function load() {
     return { ...DEFAULTS };
   }
   try {
-    const raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf-8"));
-    return { ...DEFAULTS, ...raw };
+    return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(STORE_FILE, "utf-8")) };
   } catch {
     return { ...DEFAULTS };
   }
@@ -33,9 +32,7 @@ function save(data) {
   fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2));
 }
 
-function get(key) {
-  return load()[key];
-}
+function get(key) { return load()[key]; }
 
 function set(key, value) {
   const data = load();
@@ -43,7 +40,6 @@ function set(key, value) {
   save(data);
 }
 
-// Ajouter un élément à un tableau dans le store
 function push(key, item) {
   const data = load();
   if (!Array.isArray(data[key])) data[key] = [];
