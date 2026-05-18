@@ -1,22 +1,10 @@
 module.exports = {
-  // ⚠️ Remplacez par votre numéro WhatsApp (format international, sans +)
   OWNER_NUMBER: process.env.OWNER_NUMBER || "",
-
-  // URL de votre service Render (pour le keep-alive)
-  // Ex : "https://spectral-hunter.onrender.com"
-  RENDER_URL: process.env.RENDER_URL || "",
-
-  // Préfixe des commandes
-  PREFIX: process.env.PREFIX || "",
-
-  // Nom du bot
-  BOT_NAME: "Spectral Hunter",
-
-  // Anti-spam : nombre de messages max dans la fenêtre de temps
+  PREFIX: process.env.PREFIX || "!",
+  BOT_NAME: "Spectral Hunter MD V1",
   SPAM_THRESHOLD: 5,
-  SPAM_WINDOW_MS: 3000, // 5 secondes
-
-  // Détection de purge : expulsions max dans la fenêtre de temps
-  PURGE_THRESHOLD: 5,
-  PURGE_WINDOW_MS: 10000, // 10 secondes
+  SPAM_WINDOW_MS: 5000,
+  PURGE_THRESHOLD: 3,
+  PURGE_WINDOW_MS: 10000,
+  RENDER_URL: process.env.RENDER_URL || "",
 };
