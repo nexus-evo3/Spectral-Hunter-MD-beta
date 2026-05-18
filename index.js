@@ -4,8 +4,10 @@ const {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
+  Browsers,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
+const fs = require("fs");
 const config = require("./config");
 const logger = require("./logger");
 const blacklist = require("./blacklist");
@@ -14,25 +16,20 @@ const store = require("./store");
 const defender = require("./defender");
 const router = require("./commands/router");
 const keepalive = require("./keepalive");
-const { restoreSession, hasLocalSession, clearSession, AUTH_FOLDER } = require("./session");
+
+const AUTH_FOLDER = "auth_info";
 
 let sock;
 
 async function startBot() {
-  // Restaurer la session depuis SESSION_ID
-  if (process.env.SESSION_ID && !hasLocalSession()) {
-    const ok = await restoreSession(process.env.SESSION_ID);
-    if (!ok) {
-      logger.warn("SESSION_ID invalide. Vérifiez la variable d'environnement.");
-      process.exit(1);
-    }
-  } else if (!hasLocalSession()) {
-    logger.warn("⚠️ Aucune SESSION_ID trouvée !");
-    logger.warn("Ajoutez SESSION_ID dans vos variables d'environnement.");
+  // Vérifier si la session existe
+  if (!fs.existsSync(AUTH_FOLDER) || fs.readdirSync(AUTH_FOLDER).length === 0) {
+    logger.warn("⚠️ Aucune session trouvée !");
+    logger.warn("Lancez d'abord : node connect.js [votre_numéro]");
     process.exit(1);
-  } else {
-    logger.info("✅ Session locale détectée — reconnexion...");
   }
+
+  logger.info("✅ Session trouvée — démarrage du bot...");
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
   const { version } = await fetchLatestBaileysVersion();
@@ -42,20 +39,24 @@ async function startBot() {
     auth: state,
     printQRInTerminal: false,
     logger: pino({ level: "silent" }),
-    browser: ["Spectral Hunter", "Chrome", "1.0.0"],
+    browser: Browsers.ubuntu("Chrome"),
+    mobile: false,
+    keepAliveIntervalMs: 10000,
+    connectTimeoutMs: 60000,
+    defaultQueryTimeoutMs: 60000,
   });
 
   sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      logger.info("✅ Spectral Hunter connecté !");
+      logger.info("✅ Spectral Hunter MD V1 connecté !");
       keepalive.setConnected(true);
       try {
         await sock.sendMessage(config.OWNER_NUMBER + "@s.whatsapp.net", {
           text:
             `🛡️ *SPECTRAL HUNTER MD V1*\n\n` +
-            `✅ Bot connecté et opérationnel !\n` +
-            `📅 ${new Date().toLocaleString("fr-FR")}\n\n` +
-            `Tapez *!help* pour voir toutes les commandes.`,
+            `✅ Spectral Hunter connecté\n` +
+            `⚙️ Préfixe : ${config.PREFIX}\n\n` +
+            `Tapez *${config.PREFIX}help* pour voir les commandes.`,
         });
       } catch (_) {}
     }
@@ -66,8 +67,8 @@ async function startBot() {
       const loggedOut = code === DisconnectReason.loggedOut;
       logger.warn(`Déconnecté (code: ${code})`);
       if (loggedOut) {
-        logger.warn("Session expirée — suppression et arrêt.");
-        clearSession();
+        logger.warn("Session expirée. Relancez node connect.js");
+        fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
         process.exit(1);
       } else {
         logger.info("Reconnexion dans 5s...");
@@ -126,4 +127,4 @@ router.loadCommands();
 keepalive.startServer(config.RENDER_URL);
 logger.info("🚀 Démarrage de Spectral Hunter MD V1...");
 startBot();
-      
+    
